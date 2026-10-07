@@ -1,0 +1,67 @@
+name: Terraform Destroy
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: "Environment to destroy"
+        required: true
+        type: choice
+        options:
+          - dev
+          - stage
+          - prod
+      confirm_destroy:
+        description: "Type DESTROY to continue"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: terraform-destroy-${{ inputs.environment }}
+  cancel-in-progress: false
+
+jobs:
+  destroy:
+    name: Terraform Destroy
+    runs-on: ubuntu-latest
+
+    environment: ${{ inputs.environment }}
+
+    defaults:
+      run:
+        working-directory: infra/terraform/envs/${{ inputs.environment }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Validate destroy confirmation
+        if: ${{ inputs.confirm_destroy != 'DESTROY' }}
+        run: |
+          echo "Invalid confirmation. Type DESTROY to proceed."
+          exit 1
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+
+      - name: Terraform Init
+        run: terraform init
+
+      - name: Terraform Validate
+        run: terraform validate
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.TERRAFORM_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+
+      - name: Terraform Destroy Plan
+        run: terraform plan -destroy -out=tfdestroy.plan
+
+      - name: Terraform Destroy
+        run: terraform apply -auto-approve tfdestroy.plan
