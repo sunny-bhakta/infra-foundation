@@ -30,9 +30,10 @@ module "compute" {
   environment  = var.environment
 
   ecs_task_execution_role_arn = module.iam.ecs_task_execution_role_arn
-  ecs_task_role_arn            = module.iam.ecs_task_role_arn
+  ecs_task_role_arn           = module.iam.ecs_task_role_arn
 
-  private_subnet_ids   = module.network.private_subnet_ids
+  private_subnet_ids    = module.network.private_subnet_ids
   ecs_security_group_id = module.network.ecs_security_group_id
   container_image_tag   = var.container_image_tag
+  target_group_arn = module.network.target_group_arn
 }
