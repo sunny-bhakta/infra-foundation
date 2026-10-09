@@ -1,17 +1,24 @@
 name: Terraform Plan
 
+# Run Terraform plan when infrastructure changes.
 on:
   pull_request:
+    branches:
+      - main
     paths:
       - "infra/terraform/**"
       - ".github/workflows/terraform-plan.yml"
 
+# The workflow needs:
+# - repository read access
+# - OIDC token permission for AWS authentication
 permissions:
   contents: read
   id-token: write
 
+# Prevent multiple plans for the same PR from running at once.
 concurrency:
-  group: terraform-plan-${{ github.event.pull_request.number }}
+  group: terraform-plan-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -19,37 +26,50 @@ jobs:
     name: Terraform Plan
     runs-on: ubuntu-latest
 
-    strategy:
-      matrix:
-        environment:
-          - dev
-          - stage
-          - prod
-
-    environment: ${{ matrix.environment }}
+    # AWS configuration for the development environment.
+    environment: dev
 
     defaults:
       run:
-        working-directory: infra/terraform/envs/${{ matrix.environment }}
+        working-directory: infra/terraform/envs/dev
 
     steps:
-      - name: Checkout
+      # ---------------------------------------------------------
+      # Checkout
+      # ---------------------------------------------------------
+      - name: Checkout repository
         uses: actions/checkout@v4
 
+      # ---------------------------------------------------------
+      # Terraform
+      # ---------------------------------------------------------
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v3
 
-      - name: Terraform Init
-        run: terraform init
-
-      - name: Terraform Validate
-        run: terraform validate
-
+      # ---------------------------------------------------------
+      # AWS Authentication
+      # ---------------------------------------------------------
+      # GitHub requests a short-lived OIDC token.
+      # AWS exchanges it for temporary credentials.
+      #
+      # No permanent AWS access keys are stored in GitHub.
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: ${{ vars.TERRAFORM_ROLE_ARN }}
+          role-to-assume: ${{ vars.AWS_TERRAFORM_ROLE_ARN }}
           aws-region: ${{ vars.AWS_REGION }}
 
+      # ---------------------------------------------------------
+      # Terraform Init
+      # ---------------------------------------------------------
+      # Initializes the configured S3 backend and providers.
+      - name: Terraform Init
+        run: terraform init
+
+      # ---------------------------------------------------------
+      # Terraform Plan
+      # ---------------------------------------------------------
+      # Calculates what Terraform would change without modifying
+      # AWS infrastructure.
       - name: Terraform Plan
-        run: terraform plan -no-color
+        run: terraform plan

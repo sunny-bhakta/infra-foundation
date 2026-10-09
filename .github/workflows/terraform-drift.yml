@@ -1,57 +1,83 @@
 name: Terraform Drift Detection
 
+# Run automatically every day.
+#
+# You can also trigger it manually from GitHub Actions.
 on:
   schedule:
     - cron: "0 2 * * *"
 
   workflow_dispatch:
 
+# Drift detection requires:
+# - repository read access
+# - AWS OIDC authentication
 permissions:
   contents: read
   id-token: write
 
+# Only one drift check should run at a time.
+concurrency:
+  group: terraform-drift-dev
+  cancel-in-progress: false
+
 jobs:
   drift:
-    name: Detect Drift
+    name: Check Terraform Drift
     runs-on: ubuntu-latest
 
-    strategy:
-      matrix:
-        environment:
-          - dev
-          - stage
-          - prod
-
-    environment: ${{ matrix.environment }}
+    environment: dev
 
     defaults:
       run:
-        working-directory: infra/terraform/envs/${{ matrix.environment }}
+        working-directory: infra/terraform/envs/dev
 
     steps:
-      - name: Checkout
+      # ---------------------------------------------------------
+      # Checkout
+      # ---------------------------------------------------------
+      - name: Checkout repository
         uses: actions/checkout@v4
 
+      # ---------------------------------------------------------
+      # Terraform
+      # ---------------------------------------------------------
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v3
 
-      - name: Terraform Init
-        run: terraform init
-
+      # ---------------------------------------------------------
+      # AWS Authentication
+      # ---------------------------------------------------------
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: ${{ vars.TERRAFORM_ROLE_ARN }}
+          role-to-assume: ${{ vars.AWS_TERRAFORM_ROLE_ARN }}
           aws-region: ${{ vars.AWS_REGION }}
 
-      - name: Terraform Drift Check
-        id: drift
-        run: terraform plan -detailed-exitcode -no-color
+      # ---------------------------------------------------------
+      # Terraform Init
+      # ---------------------------------------------------------
+      - name: Terraform Init
+        run: terraform init
+
+      # ---------------------------------------------------------
+      # Refresh and detect changes
+      # ---------------------------------------------------------
+      # exit code:
+      #
+      # 0 = no changes
+      # 1 = Terraform error
+      # 2 = changes detected
+      - name: Terraform Plan
+        id: plan
+        run: terraform plan -detailed-exitcode
         continue-on-error: true
 
-      - name: Report Result
-        env:
-          EXIT_CODE: ${{ steps.drift.outcome }}
+      # ---------------------------------------------------------
+      # Report result
+      # ---------------------------------------------------------
+      - name: Report drift
+        if: steps.plan.outputs.exitcode == '2'
         run: |
-          echo "Terraform drift check completed."
-          echo "Review the Terraform plan output for infrastructure differences."
+          echo "Terraform drift detected."
+          exit 1

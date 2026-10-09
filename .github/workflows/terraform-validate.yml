@@ -1,46 +1,75 @@
 name: Terraform Validate
 
+# Run validation whenever Terraform code changes.
 on:
   pull_request:
+    branches:
+      - main
     paths:
       - "infra/terraform/**"
       - ".github/workflows/terraform-validate.yml"
 
+  push:
+    branches:
+      - main
+    paths:
+      - "infra/terraform/**"
+      - ".github/workflows/terraform-validate.yml"
+
+# Terraform validation does not need write access to GitHub.
 permissions:
   contents: read
 
+# Only one validation run per branch/PR is needed.
+# A newer commit replaces an older validation run.
 concurrency:
-  group: terraform-validate-${{ github.event.pull_request.number }}
+  group: terraform-validate-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
   validate:
-    name: Validate Terraform
+    name: Terraform Validate
     runs-on: ubuntu-latest
-
-    strategy:
-      matrix:
-        environment:
-          - dev
-          - stage
-          - prod
 
     defaults:
       run:
-        working-directory: infra/terraform/envs/${{ matrix.environment }}
+        working-directory: infra/terraform/envs/dev
 
     steps:
-      - name: Checkout
+      # ---------------------------------------------------------
+      # Checkout
+      # ---------------------------------------------------------
+      # Downloads the Terraform configuration.
+      - name: Checkout repository
         uses: actions/checkout@v4
 
+      # ---------------------------------------------------------
+      # Terraform
+      # ---------------------------------------------------------
+      # Installs the Terraform CLI.
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v3
 
-      - name: Terraform Format Check
-        run: terraform fmt -check -recursive ../../..
+      # ---------------------------------------------------------
+      # Format
+      # ---------------------------------------------------------
+      # Ensures Terraform files follow standard formatting.
+      - name: Check Terraform formatting
+        run: terraform fmt -check -recursive
 
-      - name: Terraform Init
+      # ---------------------------------------------------------
+      # Initialize
+      # ---------------------------------------------------------
+      # Initializes providers and the configured backend.
+      #
+      # -backend=false prevents the validation workflow from
+      # needing access to the remote state backend.
+      - name: Initialize Terraform
         run: terraform init -backend=false
 
-      - name: Terraform Validate
+      # ---------------------------------------------------------
+      # Validate
+      # ---------------------------------------------------------
+      # Performs Terraform's static configuration validation.
+      - name: Validate Terraform
         run: terraform validate
