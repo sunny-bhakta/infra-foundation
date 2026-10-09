@@ -35,4 +35,5 @@ module "compute" {
   private_subnet_ids    = module.network.private_subnet_ids
   ecs_security_group_id = module.network.ecs_security_group_id
   container_image_tag   = var.container_image_tag
+  target_group_arn = module.network.target_group_arn
 }
