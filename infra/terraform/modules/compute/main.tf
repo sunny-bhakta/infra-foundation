@@ -102,13 +102,13 @@ resource "aws_ecs_service" "app" {
     assign_public_ip = false
   }
 
-  tags = {
-    Name = "${local.name_prefix}-service"
-  }
-}
-
-load_balancer {
+  load_balancer {
   target_group_arn = module.network.target_group_arn
   container_name   = local.name_prefix
   container_port   = 3000
+  }
+
+  tags = {
+    Name = "${local.name_prefix}-service"
+  }
 }
