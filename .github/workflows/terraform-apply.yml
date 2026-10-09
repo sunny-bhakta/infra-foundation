@@ -1,5 +1,8 @@
 name: Terraform Apply
 
+# Apply is intentionally manual.
+# Infrastructure changes should never be applied accidentally
+# just because someone pushed code.
 on:
   workflow_dispatch:
     inputs:
@@ -12,10 +15,12 @@ on:
           - stage
           - prod
 
+# Terraform needs repository access and AWS OIDC authentication.
 permissions:
   contents: read
   id-token: write
 
+# Only one Terraform apply may run for a given environment.
 concurrency:
   group: terraform-apply-${{ inputs.environment }}
   cancel-in-progress: false
@@ -25,6 +30,11 @@ jobs:
     name: Terraform Apply
     runs-on: ubuntu-latest
 
+    # IMPORTANT:
+    # Configure GitHub Environment protection rules for:
+    # dev / stage / prod.
+    #
+    # For production, require manual approval.
     environment: ${{ inputs.environment }}
 
     defaults:
@@ -32,26 +42,43 @@ jobs:
         working-directory: infra/terraform/envs/${{ inputs.environment }}
 
     steps:
-      - name: Checkout
+      # ---------------------------------------------------------
+      # Checkout
+      # ---------------------------------------------------------
+      - name: Checkout repository
         uses: actions/checkout@v4
 
+      # ---------------------------------------------------------
+      # Terraform
+      # ---------------------------------------------------------
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v3
 
-      - name: Terraform Init
-        run: terraform init
-
-      - name: Terraform Validate
-        run: terraform validate
-
+      # ---------------------------------------------------------
+      # AWS Authentication
+      # ---------------------------------------------------------
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: ${{ vars.TERRAFORM_ROLE_ARN }}
+          role-to-assume: ${{ vars.AWS_TERRAFORM_ROLE_ARN }}
           aws-region: ${{ vars.AWS_REGION }}
 
+      # ---------------------------------------------------------
+      # Terraform Init
+      # ---------------------------------------------------------
+      - name: Terraform Init
+        run: terraform init
+
+      # ---------------------------------------------------------
+      # Terraform Plan
+      # ---------------------------------------------------------
+      # Always generate a fresh plan immediately before apply.
       - name: Terraform Plan
         run: terraform plan -out=tfplan
 
+      # ---------------------------------------------------------
+      # Terraform Apply
+      # ---------------------------------------------------------
+      # Applies exactly the plan generated above.
       - name: Terraform Apply
         run: terraform apply -auto-approve tfplan

@@ -1,0 +1,54 @@
+name: Security
+
+# Run security checks for application and infrastructure changes.
+on:
+  pull_request:
+    branches:
+      - main
+
+  push:
+    branches:
+      - main
+
+# Security scanning only needs repository read access.
+permissions:
+  contents: read
+
+concurrency:
+  group: security-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  dependency-audit:
+    name: Dependency Audit
+    runs-on: ubuntu-latest
+
+    steps:
+      # ---------------------------------------------------------
+      # Checkout
+      # ---------------------------------------------------------
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # ---------------------------------------------------------
+      # Node.js
+      # ---------------------------------------------------------
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      # ---------------------------------------------------------
+      # Dependencies
+      # ---------------------------------------------------------
+      - name: Install dependencies
+        run: npm ci
+
+      # ---------------------------------------------------------
+      # npm security audit
+      # ---------------------------------------------------------
+      # Fails when high/critical dependency vulnerabilities are
+      # found according to npm's audit database.
+      - name: Dependency audit
+        run: npm audit --audit-level=high

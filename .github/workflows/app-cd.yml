@@ -1,0 +1,521 @@
+# ============================================================
+# GitHub Actions — Continuous Deployment (CD)
+# ============================================================
+#
+# Purpose:
+# 1. Manually select an environment.
+# 2. Select the Docker image tag to deploy.
+# 3. Authenticate to AWS using GitHub OIDC.
+# 4. Build the Docker image from the repository root.
+# 5. Push the image to Amazon ECR.
+# 6. Create a new ECS task-definition revision.
+# 7. Deploy the new revision to ECS.
+# 8. Wait for ECS to become stable.
+# 9. Automatically roll back if the deployment fails.
+#
+# NOTE:
+# This workflow is ECS-based.
+# If the final architecture uses EKS/Kubernetes, the deployment
+# section will later be replaced with kubectl/Helm deployment.
+# ============================================================
+
+name: Application CD
+
+# ============================================================
+# WORKFLOW TRIGGER
+# ============================================================
+# This workflow is started manually from GitHub Actions.
+#
+# The person running the workflow chooses:
+# - Which environment to deploy to
+# - Which Docker image tag to deploy
+# ============================================================
+
+on:
+  workflow_dispatch:
+
+    inputs:
+      # --------------------------------------------------------
+      # Target environment
+      # --------------------------------------------------------
+      environment:
+        description: "Environment to deploy"
+        required: true
+        type: choice
+        options:
+          - dev
+          - stage
+          - prod
+
+      # --------------------------------------------------------
+      # Docker image tag
+      # --------------------------------------------------------
+      # Example:
+      #   v1.0.0
+      #   2026-10-07-abc123
+      #   sha-abc123
+      # --------------------------------------------------------
+      image_tag:
+        description: "Docker image tag"
+        required: true
+        type: string
+
+
+# ============================================================
+# GITHUB TOKEN PERMISSIONS
+# ============================================================
+permissions:
+
+  # Allows the workflow to read repository contents.
+  contents: read
+
+  # Allows GitHub Actions to request an OIDC token.
+  #
+  # This is used to authenticate to AWS without storing
+  # long-lived AWS access keys in GitHub.
+  id-token: write
+
+
+# ============================================================
+# CONCURRENCY
+# ============================================================
+# Prevent multiple deployments to the same environment
+# from running at the same time.
+#
+# Example:
+#
+# CD to dev  ──────┐
+#                   ├── same concurrency group
+# CD to dev  ──────┘
+#
+# CD to prod uses a different group.
+# ============================================================
+
+concurrency:
+  group: cd-${{ inputs.environment }}
+
+  # Do not cancel an existing deployment.
+  # A second deployment waits until the first finishes.
+  cancel-in-progress: false
+
+
+# ============================================================
+# JOBS
+# ============================================================
+
+jobs:
+
+  # ==========================================================
+  # DEPLOY JOB
+  # ==========================================================
+
+  deploy:
+
+    name: Deploy Application
+
+    # GitHub-hosted Linux runner.
+    runs-on: ubuntu-latest
+
+    # Connect this workflow to the selected GitHub Environment.
+    #
+    # Example:
+    #   dev
+    #   stage
+    #   prod
+    #
+    # Environment-specific variables can then be configured
+    # in GitHub:
+    #
+    # Settings → Environments
+    environment: ${{ inputs.environment }}
+
+
+    # ========================================================
+    # STEPS
+    # ========================================================
+
+    steps:
+
+      # ======================================================
+      # 1. CHECKOUT SOURCE CODE
+      # ======================================================
+      # Downloads the repository into the GitHub Actions runner.
+      #
+      # The repository root becomes the Docker build context.
+      # ======================================================
+
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+
+      # ======================================================
+      # 2. CONFIGURE AWS CREDENTIALS
+      # ======================================================
+      # GitHub uses OIDC to assume an AWS IAM role.
+      #
+      # We do NOT store:
+      #
+      #   AWS_ACCESS_KEY_ID
+      #   AWS_SECRET_ACCESS_KEY
+      #
+      # in GitHub.
+      #
+      # Instead:
+      #
+      # GitHub Actions
+      #       │
+      #       ▼
+      #      OIDC
+      #       │
+      #       ▼
+      # AWS IAM Role
+      #       │
+      #       ▼
+      #      AWS
+      # ======================================================
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+
+        with:
+
+          # IAM role that GitHub Actions is allowed to assume.
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+
+          # AWS region configured for the selected environment.
+          aws-region: ${{ vars.AWS_REGION }}
+
+
+      # ======================================================
+      # 3. LOGIN TO AMAZON ECR
+      # ======================================================
+      # Authenticate Docker against Amazon ECR.
+      #
+      # The registry URL is returned through:
+      #
+      #   steps.ecr.outputs.registry
+      #
+      # Example:
+      #
+      # 123456789012.dkr.ecr.ap-south-1.amazonaws.com
+      # ======================================================
+
+      - name: Login to Amazon ECR
+        id: ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+
+      # ======================================================
+      # 4. BUILD DOCKER IMAGE
+      # ======================================================
+      # The Dockerfile is located at the repository root:
+      #
+      # /
+      # ├── Dockerfile
+      # ├── package.json
+      # ├── src/
+      # └── ...
+      #
+      # The final "." means:
+      #
+      # "Use the repository root as the Docker build context."
+      #
+      # Docker therefore looks for:
+      #
+      #   ./Dockerfile
+      #
+      # by default.
+      # ======================================================
+
+      - name: Build Docker image
+
+        env:
+          # ECR registry returned by the login step.
+          ECR_REGISTRY: ${{ steps.ecr.outputs.registry }}
+
+          # ECR repository name configured for the environment.
+          ECR_REPOSITORY: ${{ vars.ECR_REPOSITORY }}
+
+          # Image tag supplied when manually starting the workflow.
+          IMAGE_TAG: ${{ inputs.image_tag }}
+
+        run: |
+          # Build the Docker image from the repository root.
+          #
+          # -t gives the image its full ECR name.
+          #
+          # The final "." means:
+          # "Use the repository root as the Docker build context."
+
+          docker build \
+            -t "$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG" \
+            .
+
+
+      # ======================================================
+      # 5. PUSH DOCKER IMAGE TO ECR
+      # ======================================================
+      # Push the exact image that we just built.
+      #
+      # Example:
+      #
+      # ECR
+      # └── ai-engineering-platform
+      #       └── v1.0.0
+      # ======================================================
+
+      - name: Push Docker image
+
+        env:
+          ECR_REGISTRY: ${{ steps.ecr.outputs.registry }}
+          ECR_REPOSITORY: ${{ vars.ECR_REPOSITORY }}
+          IMAGE_TAG: ${{ inputs.image_tag }}
+
+        run: |
+
+          # Push the immutable deployment image to ECR.
+
+          docker push \
+            "$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG"
+
+
+      # ======================================================
+      # 6. DEPLOY IMAGE TO ECS
+      # ======================================================
+      # ECS deployments work by creating a new revision of
+      # the ECS task definition.
+      #
+      # We:
+      #
+      # 1. Find the currently running task definition.
+      # 2. Download it.
+      # 3. Replace the container image.
+      # 4. Register a new task-definition revision.
+      # 5. Tell ECS to use the new revision.
+      # ======================================================
+
+      - name: Deploy to ECS
+        id: deploy_ecs
+
+        env:
+
+          # ECS cluster containing the application.
+          ECS_CLUSTER: ${{ vars.ECS_CLUSTER }}
+
+          # ECS service running the application.
+          ECS_SERVICE: ${{ vars.ECS_SERVICE }}
+
+          # Name of the container inside the task definition.
+          CONTAINER_NAME: ${{ vars.CONTAINER_NAME }}
+
+          # ECR information.
+          ECR_REGISTRY: ${{ steps.ecr.outputs.registry }}
+          ECR_REPOSITORY: ${{ vars.ECR_REPOSITORY }}
+
+          # Image version selected by the operator.
+          IMAGE_TAG: ${{ inputs.image_tag }}
+
+        run: |
+
+          # --------------------------------------------------
+          # Build the complete Docker image URI.
+          #
+          # Example:
+          #
+          # 123456789012.dkr.ecr.ap-south-1.amazonaws.com/
+          # ai-engineering-platform:v1.0.0
+          # --------------------------------------------------
+
+          IMAGE_URI="$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG"
+
+
+          # --------------------------------------------------
+          # Find the currently running ECS task definition.
+          #
+          # We save this because it allows us to roll back
+          # if the new deployment fails.
+          # --------------------------------------------------
+
+          CURRENT_TASK_DEF_ARN=$(aws ecs describe-services \
+            --cluster "$ECS_CLUSTER" \
+            --services "$ECS_SERVICE" \
+            --query "services[0].taskDefinition" \
+            --output text)
+
+
+          # Store the old task definition as a GitHub Actions
+          # output so the rollback step can use it.
+
+          echo "previous_task_definition_arn=$CURRENT_TASK_DEF_ARN" \
+            >> "$GITHUB_OUTPUT"
+
+
+          # --------------------------------------------------
+          # Download the current ECS task definition.
+          # --------------------------------------------------
+
+          aws ecs describe-task-definition \
+            --task-definition "$CURRENT_TASK_DEF_ARN" \
+            --query "taskDefinition" \
+            --output json \
+            > task-definition.json
+
+
+          # --------------------------------------------------
+          # Determine which container should receive the
+          # new Docker image.
+          #
+          # If CONTAINER_NAME is not configured, use the
+          # first container in the task definition.
+          # --------------------------------------------------
+
+          if [ -z "$CONTAINER_NAME" ]; then
+            CONTAINER_NAME=$(jq -r '.containerDefinitions[0].name' task-definition.json)
+          fi
+
+
+          # --------------------------------------------------
+          # Update ONLY the selected container's image.
+          #
+          # ECS generates a new task-definition revision.
+          #
+          # Read-only AWS metadata fields are removed before
+          # registering the new revision.
+          # --------------------------------------------------
+
+          jq \
+            --arg IMAGE_URI "$IMAGE_URI" \
+            --arg CONTAINER_NAME "$CONTAINER_NAME" '
+
+            .containerDefinitions = (
+              .containerDefinitions
+              | map(
+                  if .name == $CONTAINER_NAME
+                  then .image = $IMAGE_URI
+                  else .
+                  end
+                )
+            )
+
+            | del(
+                .taskDefinitionArn,
+                .revision,
+                .status,
+                .requiresAttributes,
+                .compatibilities,
+                .registeredAt,
+                .registeredBy
+              )
+
+          ' task-definition.json \
+            > task-definition-updated.json
+
+
+          # --------------------------------------------------
+          # Register the modified task definition.
+          # --------------------------------------------------
+
+          NEW_TASK_DEF_ARN=$(aws ecs register-task-definition \
+            --cli-input-json file://task-definition-updated.json \
+            --query "taskDefinition.taskDefinitionArn" \
+            --output text)
+
+
+          # Save the new task definition ARN for later steps.
+
+          echo "new_task_definition_arn=$NEW_TASK_DEF_ARN" \
+            >> "$GITHUB_OUTPUT"
+
+
+          # --------------------------------------------------
+          # Tell ECS service to use the new task definition.
+          # --------------------------------------------------
+
+          aws ecs update-service \
+            --cluster "$ECS_CLUSTER" \
+            --service "$ECS_SERVICE" \
+            --task-definition "$NEW_TASK_DEF_ARN"
+
+
+      # ======================================================
+      # 7. WAIT FOR ECS DEPLOYMENT
+      # ======================================================
+      # Wait until ECS reports that the service has become
+      # stable.
+      #
+      # continue-on-error is used so that the next step can
+      # perform an automatic rollback.
+      # ======================================================
+
+      - name: Wait for ECS deployment
+        id: wait_ecs
+        continue-on-error: true
+
+        env:
+          ECS_CLUSTER: ${{ vars.ECS_CLUSTER }}
+          ECS_SERVICE: ${{ vars.ECS_SERVICE }}
+
+        run: |
+
+          # Wait until the ECS service reaches a stable state.
+
+          aws ecs wait services-stable \
+            --cluster "$ECS_CLUSTER" \
+            --services "$ECS_SERVICE"
+
+
+      # ======================================================
+      # 8. AUTOMATIC ROLLBACK
+      # ======================================================
+      # This step only runs if the previous deployment failed
+      # to become stable.
+      #
+      # We restore the task definition that was running before
+      # the deployment started.
+      # ======================================================
+
+      - name: Rollback ECS deployment
+
+        if: ${{ steps.wait_ecs.outcome == 'failure' }}
+
+        env:
+          ECS_CLUSTER: ${{ vars.ECS_CLUSTER }}
+          ECS_SERVICE: ${{ vars.ECS_SERVICE }}
+
+          # Previous task definition captured before deployment.
+          PREVIOUS_TASK_DEF_ARN: ${{ steps.deploy_ecs.outputs.previous_task_definition_arn }}
+
+        run: |
+
+          echo "Deployment failed to stabilize."
+          echo "Rolling back to the previous ECS task definition..."
+
+
+          # --------------------------------------------------
+          # Restore the previous task definition.
+          # --------------------------------------------------
+
+          aws ecs update-service \
+            --cluster "$ECS_CLUSTER" \
+            --service "$ECS_SERVICE" \
+            --task-definition "$PREVIOUS_TASK_DEF_ARN"
+
+
+          # --------------------------------------------------
+          # Wait until the rollback itself becomes stable.
+          # --------------------------------------------------
+
+          aws ecs wait services-stable \
+            --cluster "$ECS_CLUSTER" \
+            --services "$ECS_SERVICE"
+
+
+          echo "Rollback completed."
+          echo "Marking workflow as failed so the deployment failure"
+          echo "remains visible in GitHub Actions."
+
+
+          # Even though rollback succeeded, the original
+          # deployment failed, so the workflow should be red.
+
+          exit 1
