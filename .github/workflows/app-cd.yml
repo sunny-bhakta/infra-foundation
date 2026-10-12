@@ -149,6 +149,32 @@ jobs:
 
 
       # ======================================================
+      # 1.1 OIDC DEBUG CONTEXT (SAFE)
+      # ======================================================
+      # Prints non-secret context values helpful for diagnosing
+      # sts:AssumeRoleWithWebIdentity authorization issues.
+      # ======================================================
+
+      - name: Debug OIDC context
+        run: |
+          echo "github_repository=$GITHUB_REPOSITORY"
+          echo "github_ref=$GITHUB_REF"
+          echo "github_event_name=$GITHUB_EVENT_NAME"
+          echo "github_workflow=$GITHUB_WORKFLOW"
+          echo "job_environment=${{ inputs.environment }}"
+          echo "expected_sub_environment=repo:$GITHUB_REPOSITORY:environment:${{ inputs.environment }}"
+          echo "expected_sub_ref=repo:$GITHUB_REPOSITORY:ref:$GITHUB_REF"
+          echo "aws_region_var_set=${{ vars.AWS_REGION != '' }}"
+          echo "deploy_role_var_set=${{ vars.AWS_DEPLOY_ROLE_ARN != '' }}"
+          echo "deploy_role_arn=${{ vars.AWS_DEPLOY_ROLE_ARN }}"
+          if [ -n "$ACTIONS_ID_TOKEN_REQUEST_URL" ]; then
+            echo "id_token_request_url_present=true"
+          else
+            echo "id_token_request_url_present=false"
+          fi
+
+
+      # ======================================================
       # 2. CONFIGURE AWS CREDENTIALS
       # ======================================================
       # GitHub uses OIDC to assume an AWS IAM role.
