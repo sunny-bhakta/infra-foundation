@@ -58,7 +58,7 @@ jobs:
       # Terraform Init
       # ---------------------------------------------------------
       - name: Terraform Init
-        run: terraform init
+        run: terraform init -input=false
 
       # ---------------------------------------------------------
       # Refresh and detect changes
@@ -70,8 +70,20 @@ jobs:
       # 2 = changes detected
       - name: Terraform Plan
         id: plan
-        run: terraform plan -detailed-exitcode
-        continue-on-error: true
+        run: |
+          set +e
+          terraform plan -input=false -no-color -detailed-exitcode
+          EXIT_CODE=$?
+          echo "exitcode=$EXIT_CODE" >> "$GITHUB_OUTPUT"
+
+          # 1 means Terraform error (auth/config/runtime)
+          if [ "$EXIT_CODE" -eq 1 ]; then
+            echo "Terraform plan failed."
+            exit 1
+          fi
+
+          # 0 (no drift) and 2 (drift) are both handled in next step.
+          exit 0
 
       # ---------------------------------------------------------
       # Report result
