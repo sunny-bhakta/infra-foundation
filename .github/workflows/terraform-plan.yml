@@ -47,6 +47,29 @@ jobs:
         uses: hashicorp/setup-terraform@v3
 
       # ---------------------------------------------------------
+      # OIDC Debug Context (safe)
+      # ---------------------------------------------------------
+      # Prints context values useful for troubleshooting
+      # sts:AssumeRoleWithWebIdentity failures.
+      - name: Debug OIDC context
+        run: |
+          echo "github_repository=$GITHUB_REPOSITORY"
+          echo "github_ref=$GITHUB_REF"
+          echo "github_event_name=$GITHUB_EVENT_NAME"
+          echo "github_workflow=$GITHUB_WORKFLOW"
+          echo "job_environment=dev"
+          echo "expected_sub_environment=repo:$GITHUB_REPOSITORY:environment:dev"
+          echo "expected_sub_ref=repo:$GITHUB_REPOSITORY:ref:$GITHUB_REF"
+          echo "aws_region_var_set=${{ vars.AWS_REGION != '' }}"
+          echo "terraform_role_var_set=${{ vars.AWS_TERRAFORM_ROLE_ARN != '' }}"
+          echo "terraform_role_arn=${{ vars.AWS_TERRAFORM_ROLE_ARN }}"
+          if [ -n "$ACTIONS_ID_TOKEN_REQUEST_URL" ]; then
+            echo "id_token_request_url_present=true"
+          else
+            echo "id_token_request_url_present=false"
+          fi
+
+      # ---------------------------------------------------------
       # AWS Authentication
       # ---------------------------------------------------------
       # GitHub requests a short-lived OIDC token.
