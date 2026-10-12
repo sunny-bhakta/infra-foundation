@@ -86,7 +86,7 @@ resource "aws_route_table_association" "private" {
 resource "aws_security_group" "alb" {
   name        = "${local.name_prefix}-alb-sg"
   description = "Security group for the application load balancer."
-  vpc_id      = var.vpc_id
+  vpc_id      = aws_vpc.this.id
 
   ingress {
     description = "HTTP from the internet"
@@ -112,7 +112,7 @@ resource "aws_security_group" "alb" {
 resource "aws_security_group" "ecs" {
   name        = "${local.name_prefix}-ecs-sg"
   description = "Security group for ECS tasks."
-  vpc_id      = var.vpc_id
+  vpc_id      = aws_vpc.this.id
 
   ingress {
     description     = "HTTP from ALB"
@@ -145,7 +145,7 @@ resource "aws_lb" "app" {
     aws_security_group.alb.id
   ]
 
-  subnets = var.public_subnet_ids
+  subnets = aws_subnet.public[*].id
 
   tags = {
     Name = "${local.name_prefix}-alb"
@@ -157,7 +157,7 @@ resource "aws_lb_target_group" "app" {
   port        = 3000
   protocol    = "HTTP"
   target_type = "ip"
-  vpc_id      = var.vpc_id
+  vpc_id      = aws_vpc.this.id
 
   health_check {
     enabled             = true
