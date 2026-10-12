@@ -51,4 +51,5 @@ jobs:
       # Fails when high/critical dependency vulnerabilities are
       # found according to npm's audit database.
       - name: Dependency audit
-        run: npm audit --audit-level=high
+        # run: npm audit --audit-level=high todo enable it
+        run: npm audit
