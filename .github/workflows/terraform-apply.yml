@@ -30,6 +30,10 @@ jobs:
     name: Terraform Apply
     runs-on: ubuntu-latest
 
+    env:
+      TF_IN_AUTOMATION: "true"
+      TF_INPUT: "false"
+
     # IMPORTANT:
     # Configure GitHub Environment protection rules for:
     # dev / stage / prod.
@@ -53,6 +57,18 @@ jobs:
       # ---------------------------------------------------------
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v3
+
+      # ---------------------------------------------------------
+      # Preflight checks
+      # ---------------------------------------------------------
+      # Fail early with a clear error if selected environment
+      # is not fully scaffolded yet.
+      - name: Preflight environment checks
+        run: |
+          test -f backend.tf || { echo "Missing backend.tf in selected environment."; exit 1; }
+          test -f main.tf || { echo "Missing main.tf in selected environment."; exit 1; }
+          test -f provider.tf || { echo "Missing provider.tf in selected environment."; exit 1; }
+          test -f variables.tf || { echo "Missing variables.tf in selected environment."; exit 1; }
 
       # ---------------------------------------------------------
       # Remove accidental local Terraform state artifacts
@@ -83,11 +99,11 @@ jobs:
       # ---------------------------------------------------------
       # Always generate a fresh plan immediately before apply.
       - name: Terraform Plan
-        run: terraform plan -input=false -lock-timeout=5m -out=tfplan
+        run: terraform plan -input=false -no-color -lock-timeout=5m -out=tfplan
 
       # ---------------------------------------------------------
       # Terraform Apply
       # ---------------------------------------------------------
       # Applies exactly the plan generated above.
       - name: Terraform Apply
-        run: terraform apply -input=false -lock-timeout=5m -auto-approve tfplan
+        run: terraform apply -input=false -no-color -lock-timeout=5m -auto-approve tfplan
