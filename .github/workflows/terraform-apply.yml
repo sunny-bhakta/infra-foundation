@@ -55,6 +55,15 @@ jobs:
         uses: hashicorp/setup-terraform@v3
 
       # ---------------------------------------------------------
+      # Remove accidental local Terraform state artifacts
+      # ---------------------------------------------------------
+      # CI must always use remote backend state from S3.
+      - name: Remove local state artifacts
+        run: |
+          rm -f terraform.tfstate terraform.tfstate.backup tfplan
+          rm -rf .terraform
+
+      # ---------------------------------------------------------
       # AWS Authentication
       # ---------------------------------------------------------
       - name: Configure AWS credentials
@@ -67,18 +76,18 @@ jobs:
       # Terraform Init
       # ---------------------------------------------------------
       - name: Terraform Init
-        run: terraform init
+        run: terraform init -input=false -reconfigure
 
       # ---------------------------------------------------------
       # Terraform Plan
       # ---------------------------------------------------------
       # Always generate a fresh plan immediately before apply.
       - name: Terraform Plan
-        run: terraform plan -out=tfplan
+        run: terraform plan -input=false -lock-timeout=5m -out=tfplan
 
       # ---------------------------------------------------------
       # Terraform Apply
       # ---------------------------------------------------------
       # Applies exactly the plan generated above.
       - name: Terraform Apply
-        run: terraform apply -auto-approve tfplan
+        run: terraform apply -input=false -lock-timeout=5m -auto-approve tfplan
