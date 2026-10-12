@@ -87,7 +87,7 @@ jobs:
       # ---------------------------------------------------------
       # Initializes the configured S3 backend and providers.
       - name: Terraform Init
-        run: terraform init
+        run: terraform init -input=false -reconfigure
 
       # ---------------------------------------------------------
       # Terraform Plan
@@ -95,4 +95,4 @@ jobs:
       # Calculates what Terraform would change without modifying
       # AWS infrastructure.
       - name: Terraform Plan
-        run: terraform plan
+        run: terraform plan -input=false -lock-timeout=5m
