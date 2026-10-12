@@ -103,9 +103,9 @@ resource "aws_ecs_service" "app" {
   }
 
   load_balancer {
-  target_group_arn = module.network.target_group_arn
-  container_name   = local.name_prefix
-  container_port   = 3000
+    target_group_arn = var.target_group_arn
+    container_name   = local.name_prefix
+    container_port   = 3000
   }
 
   tags = {
